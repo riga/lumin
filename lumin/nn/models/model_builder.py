@@ -28,6 +28,14 @@ Todo
 '''
 
 
+class CustomSequential(nn.Sequential):
+
+    def forward(self, input, **kwargs):
+        for module in self:
+            input = module(input, **kwargs)
+        return input
+
+
 class ModelBuilder(object):
     r'''
     Class to build models to specified architecture on demand along with an optimiser.
@@ -123,12 +131,12 @@ class ModelBuilder(object):
         Instantiate a :class:`~lumin.nn.models.model_builder.ModelBuilder` from an exisitng :class:`~lumin.nn.models.model_builder.ModelBuilder`, but with options to adjust loss, optimiser, pretraining, and module freezing
 
         Arguments:
-            model_builder: existing :class:`~lumin.nn.models.model_builder.ModelBuilder` or filename for a pickled :class:`~lumin.nn.models.model_builder.ModelBuilder` 
+            model_builder: existing :class:`~lumin.nn.models.model_builder.ModelBuilder` or filename for a pickled :class:`~lumin.nn.models.model_builder.ModelBuilder`
             pretrain_file: if set, will load saved parameters for entire network from saved model
             freeze_head: whether to start with the head parameters set to untrainable
             freeze_body: whether to start with the body parameters set to untrainable
             freeze_tail: whether to start with the tail parameters set to untrainable
-            loss: either and uninstantiated loss class, or leave as 'auto' to select loss according to objective            
+            loss: either and uninstantiated loss class, or leave as 'auto' to select loss according to objective
             opt_args: dictionary of arguments to pass to optimiser. Missing kargs will be filled with default values. Choice of optimiser (`'opt'`) keyword can
                 either be set by passing the string name (e.g. `'adam'` ), but only ADAM and SGD are available this way, or by passing an uninstantiated
                 optimiser (e.g. torch.optim.Adam). If no optimser is set, then it defaults to ADAM. Additional keyword arguments can be set, and these will be
@@ -136,7 +144,7 @@ class ModelBuilder(object):
 
         Returns:
             Instantiated :class:`~lumin.nn.models.model_builder.ModelBuilder`
-            
+
         Examples::
             >>> new_model_builder = ModelBuilder.from_model_builder(
             >>>     ModelBuidler)
@@ -166,7 +174,7 @@ class ModelBuilder(object):
                    cont_subsample_rate=model_builder.cont_subsample_rate, guaranteed_feats=model_builder.guaranteed_feats,
                    loss=model_builder.loss if loss is None else loss, head=model_builder.head, body=model_builder.body, tail=model_builder.tail,
                    pretrain_file=pretrain_file, freeze_head=freeze_head, freeze_body=freeze_body, freeze_tail=freeze_tail)
-            
+
     def _parse_loss(self, loss:Union[Any,'auto']='auto') -> None:
         if loss == 'auto':
             if 'class' in self.objective:
@@ -174,7 +182,7 @@ class ModelBuilder(object):
                 else:                                                 self.loss = nn.BCELoss
             else:
                 self.loss = WeightedMSE
-        else:   
+        else:
             self.loss = loss
 
     def _parse_model_args(self, model_args:Optional[Dict[str,Any]]=None) -> None:
@@ -183,7 +191,7 @@ class ModelBuilder(object):
         self.head_kargs = {} if model_args is None or 'head' not in model_args else model_args['head']
         self.body_kargs = {} if model_args is None or 'body' not in model_args else model_args['body']
         self.tail_kargs = {} if model_args is None or 'tail' not in model_args else model_args['tail']
-    
+
     def _parse_opt_args(self, opt_args:Optional[Dict[str,Any]]=None) -> None:
         if opt_args is None: opt_args = {}
         else:                opt_args = {k.lower(): opt_args[k] for k in opt_args}
@@ -216,7 +224,7 @@ class ModelBuilder(object):
             cat_idxs  = len(self.cont_feats)+np.arange(self.cat_embedder.n_cat_in)
             self.input_mask = np.hstack((cont_idxs, cat_idxs))
             self.input_mask.sort()
-            
+
         else:
             self.use_conts = self.cont_feats
             self.n_cont_in = len(self.cont_feats)
@@ -241,7 +249,7 @@ class ModelBuilder(object):
         Arguments:
             lr: learning rate
         '''
-        
+
         self.opt_args['lr'] = lr
 
     def get_head(self) -> AbsHead:
@@ -289,7 +297,7 @@ class ModelBuilder(object):
         head = self.get_head()
         body = self.get_body(head.get_out_size(), head.feat_map)
         tail = self.get_tail(body.get_out_size())
-        return nn.Sequential(head, body, tail)
+        return CustomSequential(head, body, tail)
 
     def load_pretrained(self, model:nn.Module):
         r'''
@@ -327,5 +335,5 @@ class ModelBuilder(object):
         Returns:
             number of outputs of network
         '''
-        
+
         return self.tail.get_out_size()

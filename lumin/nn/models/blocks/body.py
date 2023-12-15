@@ -19,16 +19,16 @@ class AbsBody(AbsBlock):
                  lookup_act:Callable[[str],Any]=lookup_act, freeze:bool=False, bn_class:Callable[[int],nn.Module]=nn.BatchNorm1d):
         super().__init__(lookup_init=lookup_init, freeze=freeze)
         self.n_in,self.feat_map,self.lookup_act,self.bn_class = n_in,feat_map,lookup_act,bn_class
-    
+
 
 class IdentBody(AbsBody):
     r'''
     Placeholder body module for cases in which a body is not required. Outputs are equal to imputs.
     '''
-    
-    def forward(self, x:Tensor) -> Tensor:
+
+    def forward(self, x:Tensor, **kwargs) -> Tensor:
         return x
-    
+
     def get_out_size(self) -> int: return self.n_in
 
 
@@ -63,14 +63,14 @@ class FullyConnected(AbsBody):
         >>>
         >>> body = FullyConnected(n_in=32, feat_map=head.feat_map, depth=4,
         ...                       width=200, act='relu', growth_rate=-0.3)
-        >>>                                  
+        >>>
         >>> body = FullyConnected(n_in=32, feat_map=head.feat_map, depth=4,
         ...                       width=100, act='swish', do=0.1, res=True)
-        >>>                                  
+        >>>
         >>> body = FullyConnected(n_in=32, feat_map=head.feat_map, depth=6,
         ...                       width=32, act='selu', dense=True,
         ...                       growth_rate=0.5)
-        >>>                                  
+        >>>
         >>> body = FullyConnected(n_in=32, feat_map=head.feat_map, depth=6,
         ...                       width=50, act='prelu', bn=True,
         ...                       lookup_init=lookup_uniform_init)
@@ -99,15 +99,15 @@ class FullyConnected(AbsBody):
                                                           fan_out=self.width+int(self.width*d*self.growth_rate))
                                           if d > 0 else self._get_layer(idx=d, fan_in=self.n_in, fan_out=self.width)
                                           for d in range(self.depth)])
-            
+
         if self.freeze: self.freeze_layers()
 
     def _get_layer(self, idx:int, fan_in:Optional[int]=None, fan_out:Optional[int]=None) -> nn.Module:
         fan_in  = self.width if fan_in  is None else fan_in
         fan_out = self.width if fan_out is None else fan_out
         if fan_in  < 1: fan_in  = 1
-        if fan_out < 1: fan_out = 1        
-        
+        if fan_out < 1: fan_out = 1
+
         layers = []
         for i in range(2 if self.res and idx > 0 else 1):
             layers.append(nn.Linear(fan_in, fan_out))
@@ -115,11 +115,11 @@ class FullyConnected(AbsBody):
             nn.init.zeros_(layers[-1].bias)
             if self.act != 'linear': layers.append(self.lookup_act(self.act))
             if self.bn and i == 0:  layers.append(self.bn_class(fan_out))  # In case of residual, BN will be added after addition
-            if self.do: 
+            if self.do:
                 if self.act == 'selu': layers.append(nn.AlphaDropout(self.do))
                 else:                  layers.append(nn.Dropout(self.do))
         return nn.Sequential(*layers)
-    
+
     def forward(self, x:Tensor) -> Tensor:
         if self.dense:
             for l in self.layers[:-1]: x = torch.cat((l(x), x), -1)
@@ -134,7 +134,7 @@ class FullyConnected(AbsBody):
         else:
             x = self.layers(x)
         return x
-    
+
     def get_out_size(self) -> int:
         r'''
         Get size width of output layer
@@ -142,7 +142,7 @@ class FullyConnected(AbsBody):
         Returns:
             Width of output layer
         '''
-        
+
         return self.layers[-1][0].out_features
 
 
@@ -200,7 +200,7 @@ class MultiBlock(AbsBody):
         super().__init__(n_in=n_in, feat_map=feat_map, lookup_init=lookup_init, lookup_act=lookup_act, freeze=freeze)
         self.feats_per_block,self.bottleneck_sz,self.bottleneck_act = feats_per_block,bottleneck_sz,bottleneck_act
         self.blocks,self.n_out,self.masks,self.bottleneck_blocks = [],0,[],None
-        
+
         if self.bottleneck_sz > 0:
             self.bottleneck_blocks,self.bottleneck_masks = [],[]
             for fpb in self.feats_per_block:
@@ -235,9 +235,9 @@ class MultiBlock(AbsBody):
         Returns:
             Total number of outputs across all blocks
         '''
-        
+
         return self.n_out
-    
+
     def forward(self, x:Tensor) -> Tensor:
         y = None
         for i, b in enumerate(self.blocks):

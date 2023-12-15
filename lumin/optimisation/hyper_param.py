@@ -68,7 +68,7 @@ def get_opt_rf_params(x_trn:np.ndarray, y_trn:np.ndarray, x_val:np.ndarray, y_va
             else:
                 best_scores.append(best_scores[-1])
             if verbose: mb.update_graph([[range(len(best_scores)), best_scores], [range(len(scores)), scores]])
-    
+
     if verbose: delattr(mb, 'fig')
     if verbose: plt.clf()
     return best_params, best_m
@@ -77,7 +77,7 @@ def get_opt_rf_params(x_trn:np.ndarray, y_trn:np.ndarray, x_val:np.ndarray, y_va
 def lr_find(fy:FoldYielder, model_builder:ModelBuilder, bs:int, n_epochs:int=1,
             train_on_weights:bool=True, n_repeats:int=-1, lr_bounds:Tuple[float,float]=[1e-5, 10],
             cb_partials:Optional[List[partial]]=None, plot_settings:PlotSettings=PlotSettings(),
-            bulk_move:bool=True, plot_savename:Optional[str]=None, show_plot:bool=True) -> List[LRFinder]:
+            bulk_move:bool=True, plot_savename:Optional[str]=None, show_plot:bool=True, fit_kwargs=None) -> List[LRFinder]:
     r'''
     Wrapper function for training using :class:`~lumin.nn.callbacks.opt_callbacks.LRFinder` which runs a Smith LR range test (https://arxiv.org/abs/1803.09820)
     using folds in :class:`~lumin.nn.data.fold_yielder.FoldYielder`.
@@ -93,7 +93,7 @@ def lr_find(fy:FoldYielder, model_builder:ModelBuilder, bs:int, n_epochs:int=1,
         shuffle_fold: whether to shuffle data in folds
         n_folds: if >= 1, will only train n_folds number of models, otherwise will train one model per fold
         lr_bounds: starting and ending LR values
-        cb_partials: optional list of functools.partial, each of which will a instantiate :class:`~lumin.nn.callbacks.callback.Callback` when called        
+        cb_partials: optional list of functools.partial, each of which will a instantiate :class:`~lumin.nn.callbacks.callback.Callback` when called
         plot_settings: :class:`~lumin.plotting.plot_settings.PlotSettings` class to control figure appearance
         savename: Optional name of file to which to save the plot
         show_plot: whether to show the plot, or just save them
@@ -115,10 +115,10 @@ def lr_find(fy:FoldYielder, model_builder:ModelBuilder, bs:int, n_epochs:int=1,
         lrf = LRFinder(lr_bounds=lr_bounds, nb=nb)
         trn_idxs = list(range(fy.n_folds))
         trn_idxs.remove(idx)
-        model.fit(n_epochs=n_epochs, fy=fy, bs=bs, bulk_move=bulk_move, train_on_weights=train_on_weights, trn_idxs=trn_idxs, cbs=cbs+[lrf], model_bar=mb)
+        model.fit(n_epochs=n_epochs, fy=fy, bs=bs, bulk_move=bulk_move, train_on_weights=train_on_weights, trn_idxs=trn_idxs, cbs=cbs+[lrf], model_bar=mb, **(fit_kwargs or {}))
         lr_finders.append(lrf)
     del model
-        
+
     print("LR finder took {:.3f}s ".format(timeit.default_timer()-tmr))
     plot_lr_finders(lr_finders, loss_range='auto', settings=plot_settings, log_y='auto' if 'regress' in model_builder.objective.lower() else False,
                     savename=plot_savename, show_plot=show_plot)

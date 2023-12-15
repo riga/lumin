@@ -28,7 +28,7 @@ def train_models(fy:FoldYielder, n_models:int, bs:int, model_builder:ModelBuilde
                  train_on_weights:bool=True, bulk_move:bool=True, start_model_id:int=0,
                  excl_idxs:Optional[List[int]]=None, unique_trn_idxs:bool=False,
                  live_fdbk:bool=IN_NOTEBOOK, live_fdbk_first_only:bool=False, live_fdbk_extra:bool=True, live_fdbk_extra_first_only:bool=False,
-                 savepath:Path=Path('train_weights'), plot_settings:PlotSettings=PlotSettings()) \
+                 savepath:Path=Path('train_weights'), plot_settings:PlotSettings=PlotSettings(), fit_kwargs=None) \
         -> Tuple[List[Dict[str,float]],List[Dict[str,List[float]]],List[Dict[str,float]]]:
     r'''
     Main training method for :class:`~lumin.nn.models.model.Model`.
@@ -38,7 +38,7 @@ def train_models(fy:FoldYielder, n_models:int, bs:int, model_builder:ModelBuilde
     Note, this does not return trained models, instead they are saved and must be loaded later. Instead this method returns results of model training.
     Each :class:`~lumin.nn.models.model.Model` is trained on N-1 folds, for a :class:`~lumin.nn.data.fold_yielder.FoldYielder` with N folds, and the remaining
     fold is used as validation data.
-        
+
     Depending on the live_fdbk arguments, live plots of losses and other metrics may be shown during training, if running in Jupyter.
     Showing the live plot slightly slows down the training, but can help highlight problems without having to wait to the end.
     If not running in Jupyter, then losses are printed to the terminal.
@@ -56,7 +56,7 @@ def train_models(fy:FoldYielder, n_models:int, bs:int, model_builder:ModelBuilde
         cb_partials: optional list of functools.partial, each of which will instantiate a :class:`~lumin.nn.callbacks.callback.Callback` when called
         metric_partials: optional list of functools.partial, each of which will a instantiate :class:`~lumin.nn.metric.eval_metric.EvalMetric`,
             used to compute additional metrics on validation data after each epoch.
-            :class:`~lumin.nn.callbacks.monitors.SaveBest` and :class:`~lumin.nn.callbacks.monitors.EarlyStopping` will also act on the (first) metric set to 
+            :class:`~lumin.nn.callbacks.monitors.SaveBest` and :class:`~lumin.nn.callbacks.monitors.EarlyStopping` will also act on the (first) metric set to
             `main_metric` instead of loss, except when another callback produces an alternative loss and model
             (like :class:`~lumin.nn.callbacks.model_callbacks.SWA`).
         save_best: if true, will save the best performing model as the final model, otherwise will save the model state as per the end of training.
@@ -66,7 +66,7 @@ def train_models(fy:FoldYielder, n_models:int, bs:int, model_builder:ModelBuilde
         start_model_id: model ID at whcih to start training,
             i.e. if training was interupted, this can be set to resume training form the last model which was trained
         excl_idxs: optional list of fold indices to exclude from training and validation
-        unique_trn_idxs: if false, then fold indices can be shared, 
+        unique_trn_idxs: if false, then fold indices can be shared,
             e.g. if `fy` contains 10 folds and five models are requested, each model will be trained on 9 folds.
             if true, each model will every model will be trained on different folds,
             e.g. if `fy` contains 10 folds and five models are requested, each model will be trained on 2 folds and no same fold is used to train more than one model
@@ -105,7 +105,7 @@ def train_models(fy:FoldYielder, n_models:int, bs:int, model_builder:ModelBuilde
     for i in model_rng: os.system(f"rm -r {savepath}/model_id_{i}")
     model_bar = master_bar(model_rng) if IN_NOTEBOOK else progress_bar(model_rng)
     train_tmr = timeit.default_timer()
-    for model_num in (model_bar):    
+    for model_num in (model_bar):
         if IN_NOTEBOOK: model_bar.show()
         val_idx  = val_idxs[model_num]     if unique_trn_idxs else idxs[model_num % len(idxs)]
         trn_idxs = trn_idx_sets[model_num] if unique_trn_idxs else [j for j in idxs if j != val_idx]
@@ -128,7 +128,7 @@ def train_models(fy:FoldYielder, n_models:int, bs:int, model_builder:ModelBuilde
 
         model_tmr = timeit.default_timer()
         model.fit(n_epochs=n_epochs, fy=fy, bs=bs, bulk_move=bulk_move, train_on_weights=train_on_weights, trn_idxs=trn_idxs, val_idx=val_idx,
-                  cbs=cbs, cb_savepath=model_dir)
+                  cbs=cbs, cb_savepath=model_dir, **(fit_kwargs or {}))
         print(f"Model took {timeit.default_timer()-model_tmr:.3f}s\n")
         model.save(model_dir/f'train_{model_num}.h5')
 
@@ -141,7 +141,7 @@ def train_models(fy:FoldYielder, n_models:int, bs:int, model_builder:ModelBuilde
         results[-1]['path'] = model_dir
         with open(savepath/'results_file.pkl', 'wb') as fout: pickle.dump(results, fout)
         with open(savepath/'cycle_file.pkl', 'wb') as fout: pickle.dump(cycle_losses, fout)
-        
+
         plt.clf()
 
     print("\n______________________________________")

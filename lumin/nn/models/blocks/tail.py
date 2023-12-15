@@ -23,9 +23,9 @@ class IdentTail(AbsTail):
     Placeholder tail module for cases in which a tail is not required. Outputs are equal to imputs.
     '''
 
-    def forward(self, x:Tensor) -> Tensor:
+    def forward(self, x:Tensor, **kwargs) -> Tensor:
         return x
-    
+
     def get_out_size(self) -> int: return self.n_in
 
 
@@ -36,7 +36,7 @@ class ClassRegMulti(AbsTail):
     Takes output size of network body and scales it to required number of outputs.
     For regression tasks, y_range can be set with per-output minima and maxima. The outputs are then adjusted according to ((y_max-y_min)*x)+self.y_min, where x
     is the output of the network passed through a sigmoid function. Effectively allowing regression to be performed without normalising and standardising the
-    target values. Note it is safest to allow some leaway in setting the min and max, e.g. max = 1.2*max, min = 0.8*min 
+    target values. Note it is safest to allow some leaway in setting the min and max, e.g. max = 1.2*max, min = 0.8*min
     Output activation function is automatically set according to objective and y_range.
 
     Arguments:
@@ -106,11 +106,11 @@ class ClassRegMulti(AbsTail):
         if key == 0: return self.dense
         if key == 1: return self.act
         raise IndexError(f'Index {key} out of range')
-        
+
     def _build_layers(self) -> None:
         self.dense = nn.Linear(self.n_in, self.n_out)
         if 'class' in self.objective:
-            if 'multiclass' in self.objective: 
+            if 'multiclass' in self.objective:
                 self.act = nn.LogSoftmax(1)
                 init = self.lookup_init('softmax', self.n_in, self.n_out)
                 bias = 1/self.n_out if self.bias_init is None else self.bias_init
@@ -136,7 +136,7 @@ class ClassRegMulti(AbsTail):
         if   self.y_range is not None: x = (self.y_diff*x)+self.y_min
         elif self.rescale:             x = (self.y_std*x)+self.y_mean
         return x
-        
+
     def get_out_size(self) -> int:
         r'''
         Get size width of output layer
@@ -144,5 +144,5 @@ class ClassRegMulti(AbsTail):
         Returns:
             Width of output layer
         '''
-        
+
         return self.n_out

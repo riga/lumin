@@ -34,7 +34,7 @@ class Model(AbsModel):
     Note that saved models can be instantiated direcly via :meth:`~lumin.nn.models.model.Model.from_save` classmethod.
 
     # TODO: Improve mask description & user-friendlyness, change to indicate that 'masked' inputs are actually the ones which are used
-    
+
     Arguments:
         model_builder: :class:`~lumin.nn.models.model_builder.ModelBuilder` which will construct the network, loss, optimiser, and input mask
 
@@ -77,14 +77,14 @@ class Model(AbsModel):
     def from_save(cls, name:str, model_builder:ModelBuilder) -> AbsModel:
         r'''
         Instantiated a :class:`~lumin.nn.models.model.Model` and load saved state from file.
-        
+
         Arguments:
             name: name of file containing saved state
             model_builder: :class:`~lumin.nn.models.model_builder.ModelBuilder` which was used to construct the network
-        
+
         Returns:
             Instantiated :class:`~lumin.nn.models.model.Model` with network weights, optimiser state, and input mask loaded from saved state
-        
+
         Examples::
             >>> model = Model.from_save('weights/model.h5', model_builder)
         '''
@@ -103,8 +103,8 @@ class Model(AbsModel):
         Returns:
             NUmber of (trainable) parameters in model
         '''
-        
-        return sum(p.numel() for p in self.parameters() if p.requires_grad or not trainable) 
+
+        return sum(p.numel() for p in self.parameters() if p.requires_grad or not trainable)
 
     def set_input_mask(self, mask:np.ndarray) -> None:
         r'''
@@ -116,10 +116,10 @@ class Model(AbsModel):
 
         self.input_mask = mask
 
-    def _fit_batch(self, x:Tensor, y:Tensor, w:Tensor) -> None:
+    def _fit_batch(self, x:Tensor, y:Tensor, w:Tensor, forward_kwargs=None) -> None:
         self.fit_params.x,self.fit_params.y,self.fit_params.w = x,y,w
         for c in self.fit_params.cbs: c.on_batch_begin()
-        self.fit_params.y_pred = self.model(self.fit_params.x)
+        self.fit_params.y_pred = self.model(self.fit_params.x, **(forward_kwargs or {}))
         if self.fit_params.state != 'test' and self.fit_params.loss_func is not None:
             if hasattr(self.fit_params.loss_func, 'weights'): self.fit_params.loss_func.weights = self.fit_params.w  # Proper weighting required
             else:                                             self.fit_params.loss_func.weight  = self.fit_params.w
@@ -135,10 +135,10 @@ class Model(AbsModel):
 
     def fit(self, n_epochs:int, fy:FoldYielder, bs:int, bulk_move:bool=True, train_on_weights:bool=True, trn_idxs:Optional[List[int]]=None,
             val_idx:Optional[int]=None,  cbs:Optional[Union[AbsCallback,List[AbsCallback]]]=None, cb_savepath:Path=Path('train_weights'),
-            model_bar:Optional[master_bar]=None, visible_bar:bool=True) -> List[AbsCallback]:
+            model_bar:Optional[master_bar]=None, visible_bar:bool=True, forward_kwargs_factory=None) -> List[AbsCallback]:
         r'''
         Fit network to training data according to the model's loss and optimiser.
-        
+
         Training continues until:
         - All of the training folds are used n_epoch number of times;
         - Or a callback triggers training to stop, e.g. :class:`~lumin.nn.callbacks.cyclic_callbacks.OneCycle`,
@@ -159,7 +159,7 @@ class Model(AbsModel):
         Returns:
             List of all callbacks used during training
         '''
-        
+
         if cbs is None: cbs = []
         elif not is_listy(cbs): cbs = [cbs]
         cyclic_cbs,loss_cbs,metric_log = [],[],None
@@ -188,6 +188,10 @@ class Model(AbsModel):
                                  bs=self.fit_params.fy.get_data_count(self.fit_params.val_idx) if bulk_move else self.fit_params.bs)
         trn_by = partial(self.fit_params.partial_by, drop_last=True, bs=self.fit_params.bs, shuffle=True)
 
+        # default forward_kwargs_factory
+        if not callable(forward_kwargs_factory):
+            forward_kwargs_factory = lambda model, step: None
+
         def fit_epoch() -> None:
             self.model.train()
             self.fit_params.state = 'train'
@@ -199,7 +203,8 @@ class Model(AbsModel):
                 self.fit_params.sub_epoch += 1
                 self.fit_params.by = trn_by(**self.fit_params.fy.get_fold(self.fit_params.trn_idx))
                 for c in self.fit_params.cbs: c.on_fold_begin()
-                for b in self.fit_params.by: self._fit_batch(*b)
+                for step, b in enumerate(self.fit_params.by):
+                    self._fit_batch(*b, forward_kwargs=forward_kwargs_factory(self, step))
                 for c in self.fit_params.cbs: c.on_fold_end()
                 if self.fit_params.stop: break
             for c in self.fit_params.cbs: c.on_epoch_end()
@@ -211,7 +216,8 @@ class Model(AbsModel):
                     for c in self.fit_params.cbs: c.on_epoch_begin()
                     self.fit_params.by = val_by if bulk_move else val_by(**self.fit_params.fy.get_fold(self.fit_params.val_idx))
                     for c in self.fit_params.cbs: c.on_fold_begin()
-                    for b in self.fit_params.by: self._fit_batch(*b)
+                    for step, b in enumerate(self.fit_params.by):
+                        self._fit_batch(*b, forward_kwargs=forward_kwargs_factory(self, step))
                     for c in self.fit_params.cbs: c.on_fold_end()
                     for c in self.fit_params.cbs: c.on_epoch_end()
 
@@ -228,17 +234,23 @@ class Model(AbsModel):
             torch.cuda.empty_cache()
         return cbs
 
-    def _predict_by(self, by:BatchYielder, pred_cb:PredHandler=PredHandler(), cbs:Optional[Union[AbsCallback,List[AbsCallback]]]=None) -> np.ndarray:
+    def _predict_by(self, by:BatchYielder, pred_cb:PredHandler=PredHandler(), cbs:Optional[Union[AbsCallback,List[AbsCallback]]]=None, forward_kwargs_factory=None) -> np.ndarray:
         if cbs is None: cbs = []
         elif not is_listy(cbs): cbs = [cbs]
         cbs.append(pred_cb)
         self.fit_params = FitParams(cbs=cbs, by=by, state='test', val_requires_grad=False)
+
+        # default forward_kwargs_factory
+        if not callable(forward_kwargs_factory):
+            forward_kwargs_factory = lambda model, step: None
+
         try:
             for c in self.fit_params.cbs: c.set_model(self)
             self.model.eval()
             with torch.set_grad_enabled(self.fit_params.val_requires_grad):
                 for c in self.fit_params.cbs: c.on_pred_begin()
-                for b in self.fit_params.by: self._fit_batch(*b)
+                for step, b in enumerate(self.fit_params.by):
+                    self._fit_batch(*b, forward_kwargs=forward_kwargs_factory(self, step))
                 for c in self.fit_params.cbs: c.on_pred_end()
         finally:
             self.fit_params = None
@@ -257,7 +269,7 @@ class Model(AbsModel):
         return preds
 
     def evaluate(self, inputs:Union[np.ndarray,Tensor,Tuple,BatchYielder], targets:Optional[Union[np.ndarray,Tensor]]=None,
-                 weights:Optional[Union[np.ndarray,Tensor]]=None, bs:Optional[int]=None, batch_yielder_type:Type[BatchYielder]=BatchYielder) -> float:
+                 weights:Optional[Union[np.ndarray,Tensor]]=None, bs:Optional[int]=None, batch_yielder_type:Type[BatchYielder]=BatchYielder, forward_kwargs_factory=None) -> float:
         r'''
         Compute loss on provided data.
 
@@ -283,9 +295,14 @@ class Model(AbsModel):
         if is_partially(self.fit_params.loss_func): self.fit_params.loss_func = self.fit_params.loss_func()
         self.model.eval()
         loss,cnt = 0,0
+
+        # default forward_kwargs_factory
+        if not callable(forward_kwargs_factory):
+            forward_kwargs_factory = lambda model, step: None
+
         try:
-            for b in self.fit_params.by:
-                self._fit_batch(*b)
+            for step, b in enumerate(self.fit_params.by):
+                self._fit_batch(*b, forward_kwargs=forward_kwargs_factory(self, step))
                 sz = len(b[0])
                 loss += self.fit_params.loss_val.data.item()*sz
                 cnt += sz
@@ -311,7 +328,7 @@ class Model(AbsModel):
                 cbs:Optional[List[AbsCallback]]=None, bs:Optional[int]=None, batch_yielder_type:Type[BatchYielder]=BatchYielder) -> Union[np.ndarray, Tensor, None]:
         r'''
         Apply model to inputed data and compute predictions.
-        
+
         Arguments:
             inputs: input data as Numpy array, Pandas DataFrame, or tensor on device, or :class:`~lumin.nn.data.fold_yielder.FoldYielder` interfacing to data
             as_np: whether to return predictions as Numpy array (otherwise tensor) if inputs are a Numpy array, Pandas DataFrame, or tensor
@@ -338,7 +355,7 @@ class Model(AbsModel):
         Returns:
             state_dict of weights for network
         '''
-        
+
         return self.model.state_dict()
 
     def set_weights(self, weights:OrderedDict) -> None:
@@ -348,7 +365,7 @@ class Model(AbsModel):
         Arguments:
             weights: state_dict of weights for network
         '''
-        
+
         self.model.load_state_dict(weights)
 
     def get_lr(self) -> float:
@@ -358,7 +375,7 @@ class Model(AbsModel):
         Returns:
             learning rate of optimiser
         '''
-        
+
         return self.opt.param_groups[0]['lr']
 
     def set_lr(self, lr:float) -> None:
@@ -368,7 +385,7 @@ class Model(AbsModel):
         Arguments:
             lr: learning rate of optimiser
         '''
-        
+
         self.opt.param_groups[0]['lr'] = lr
 
     def get_mom(self) -> float:
@@ -378,7 +395,7 @@ class Model(AbsModel):
         Returns:
             momentum/beta_1 of optimiser
         '''
-        
+
         if   'betas'    in self.opt.param_groups[0]: return self.opt.param_groups[0]['betas'][0]
         elif 'momentum' in self.opt.param_groups[0]: return self.opt.param_groups[0]['momentum']
 
@@ -392,7 +409,7 @@ class Model(AbsModel):
 
         if   'betas'    in self.opt.param_groups[0]: self.opt.param_groups[0]['betas'] = (mom, self.opt.param_groups[0]['betas'][1])
         elif 'momentum' in self.opt.param_groups[0]: self.opt.param_groups[0]['momentum'] = mom
-    
+
     def save(self, name:str) -> None:
         r'''
         Save model, optimiser, and input mask states to file
@@ -402,7 +419,7 @@ class Model(AbsModel):
         '''
 
         torch.save({'model':self.model.state_dict(), 'opt':self.opt.state_dict(), 'input_mask':self.input_mask}, str(name))
-        
+
     def load(self, name:str, model_builder:ModelBuilder=None) -> None:
         r'''
         Load model, optimiser, and input mask states from file
@@ -433,13 +450,13 @@ class Model(AbsModel):
         '''
 
         # TODO: Pass FoldYielder to get example dummy input, or account for matrix inputs
-        
+
         warnings.warn("""ONNX export of LUMIN models has not been fully explored or sufficiently tested yet.
                          Please use with caution, and report any trouble""")
         if '.onnx' not in name: name += '.onnx'
         dummy_input = to_device(torch.rand(bs, self.model_builder.n_cont_in+self.model_builder.cat_embedder.n_cat_in))
         torch.onnx.export(self.model, dummy_input, name)
-    
+
     def export2tfpb(self, name:str, bs:int=1) -> None:
         r'''
         Export network to Tensorflow ProtocolBuffer format, via ONNX.
@@ -458,7 +475,7 @@ class Model(AbsModel):
         m = onnx.load(f'{name}.onnx')
         tf_rep = prepare(m)
         tf_rep.export_graph(f'{name}.pb')
-           
+
     def get_feat_importance(self, fy:FoldYielder, bs:Optional[int]=None, eval_metric:Optional[EvalMetric]=None, savename:Optional[str]=None,
                             settings:PlotSettings=PlotSettings()) -> pd.DataFrame:
         r'''
@@ -490,7 +507,7 @@ class Model(AbsModel):
         '''
 
         for p in self.model.parameters(): p.requires_grad = False
-    
+
     def unfreeze_layers(self) -> None:
         r'''
         Make parameters trainable
